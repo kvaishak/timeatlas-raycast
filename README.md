@@ -1,34 +1,17 @@
 # Time Atlas for Raycast
 
-Raycast extension and companion tools for [Time Atlas](https://timeatlas.app).
+Raycast extension and optional companion Python tools for [Time Atlas](https://timeatlas.app).
 
-The main deliverable is **`raycast-timeatlas-note/`** — a macOS Raycast extension for Time Atlas: **Add Note** (writes JSON into the iCloud folder) and **Today at a Glance** (HUD summary via `date_query.py --summary-json`).
+## Raycast extension (`raycast-timeatlas-note/`)
 
-Discord: https://discord.gg/zwJEYNdsPE
+Zero-config macOS extension:
 
-## Raycast extension
-
-| | |
+| Command | What it does |
 | --- | --- |
-| **Commands** | Add Note, Today at a Glance |
-| **Platform** | macOS |
-| **Folder** | [`raycast-timeatlas-note/`](raycast-timeatlas-note/) |
+| **Add Note** | Writes `note_*.json` into the Time Atlas iCloud folder |
+| **Today at a Glance** | List + detail of today’s sleep, places, distance, and notes |
 
-### Requirements
-
-- [Time Atlas](https://timeatlas.app) installed and signed in to iCloud
-- iCloud Drive enabled on Mac
-- For **Today at a Glance**: this repo synced (`python sync.py`) plus preferences for the repo folder and Python path
-
-Default write path (Add Note):
-
-```text
-~/Library/Mobile Documents/iCloud~com~timeatlaslabs~Pat/Documents
-```
-
-Optional preference **Time Atlas iCloud Folder** overrides that path.
-
-### Develop locally
+Requires Time Atlas + iCloud Drive. No Python, repo path, or local DB.
 
 ```bash
 cd raycast-timeatlas-note
@@ -36,9 +19,9 @@ npm install
 npm run dev
 ```
 
-Open Raycast and run **Add Note** or **Today at a Glance**.
+Setup/error screens cover missing iCloud Drive, missing Time Atlas folder, empty day, and load failures.
 
-More detail: [`raycast-timeatlas-note/README.md`](raycast-timeatlas-note/README.md).
+Full details: [`raycast-timeatlas-note/README.md`](raycast-timeatlas-note/README.md).
 
 ### Publish checklist
 
@@ -48,18 +31,19 @@ npm run lint
 npm run build
 ```
 
-Then capture Store screenshots into `raycast-timeatlas-note/metadata/` (Raycast **Capture Window** → Save to Metadata) and run `npm run publish`.
+Then capture Store screenshots into `metadata/` and run `npm run publish`.
 
-## Companion Python tools
+Discord: https://discord.gg/zwJEYNdsPE
 
-The rest of this repo is optional CLI tooling for syncing and querying Time Atlas data locally (SQLite). Useful for scripting and exploration; **not required** to run the Raycast extension.
+## Companion Python tools (optional)
+
+Not required for the Raycast extension. Local SQLite sync/query helpers for scripting.
 
 | Path | Purpose |
 | --- | --- |
 | `sync.py` | Import iCloud timeline files into `timeatlas.db` |
-| `timeatlas.py` | Shared helpers (iCloud path, DB queries) |
-| `tools/` | CLIs: date query, known places, GeoJSON, add note, weather |
-| `data/activity_colors.json` | Colors for GeoJSON activity strokes |
+| `timeatlas.py` | Shared helpers |
+| `tools/` | date query, known places, GeoJSON, add note, weather |
 
 ```bash
 python3 -m venv .venv
@@ -79,11 +63,11 @@ python tools/addnote.py -d 2026-04-15 -f note.txt
 python tools/weather.py 2026-04-01 2026-04-07
 ```
 
-Time Atlas iCloud locations:
+`--summary-json` is a compact SQLite-backed summary for scripts; the Raycast glance command reads iCloud directly in TypeScript instead.
 
-| Platform | Path |
+| Platform | Time Atlas iCloud path |
 | --- | --- |
 | macOS | `~/Library/Mobile Documents/iCloud~com~timeatlaslabs~Pat/Documents` |
 | Windows | `%USERPROFILE%\iCloudDrive\iCloud~com~timeatlaslabs~Pat\Documents` |
 
-See [`CLAUDE.md`](CLAUDE.md) for how the Python side was specified. PRs welcome.
+See [`CLAUDE.md`](CLAUDE.md) for the Python tooling spec. PRs welcome.

@@ -1,21 +1,23 @@
-# Time Atlas Note
+# Time Atlas
 
-Add notes to [Time Atlas](https://timeatlas.app) from Raycast. Notes are written as JSON files into the Time Atlas iCloud Documents folder so the app picks them up on its next sync.
+Raycast extension for [Time Atlas](https://timeatlas.app): add notes and see today’s timeline at a glance — **zero config** (no Python, no git checkout, no local database).
 
 ## Requirements
 
-- macOS with iCloud Drive enabled
-- [Time Atlas](https://timeatlas.app) installed and signed in (so its iCloud folder exists)
+- macOS with **iCloud Drive** enabled
+- [Time Atlas](https://timeatlas.app) installed and signed in (so its iCloud Documents folder exists)
 
-## How it works
+If iCloud Drive or the Time Atlas folder is missing, both commands show a clear setup screen with actions to open iCloud Settings / Time Atlas and to recheck.
 
-Run **Add Note**, pick a date, and write your note. The extension saves a file named `note_<timestamp>.json` to:
+## Commands
+
+### Add Note
+
+Pick a date, write a note, submit. Saves `note_<timestamp>.json` to:
 
 ```text
 ~/Library/Mobile Documents/iCloud~com~timeatlaslabs~Pat/Documents
 ```
-
-Each file looks like:
 
 ```json
 {
@@ -26,11 +28,26 @@ Each file looks like:
 }
 ```
 
+### Today at a Glance
+
+List + detail view (Overview, Sleep, Places, Distance, Notes).
+
+Each open reads the Time Atlas iCloud folder **fresh** (no disk cache):
+
+- Timeline `.pb` / `.zip` update files (protobuf)
+- Pending `note_*.json` files from **Add Note** (shown immediately, even before Time Atlas imports them)
+
+Shortcuts:
+
+- **⌘C** — copy one-line summary  
+- **⌘⇧C** — copy notes  
+- **⌘R** — refresh  
+
 ## Preferences
 
 | Preference | Description |
 | --- | --- |
-| **Time Atlas iCloud Folder** | Optional. Override the default iCloud Documents path if your Time Atlas data lives somewhere else. |
+| **Time Atlas iCloud Folder** | Optional. Override the default iCloud Documents path. |
 
 ## Development
 
@@ -39,4 +56,11 @@ npm install
 npm run dev
 ```
 
-Before publishing, run `npm run lint` and `npm run build`, then capture Store screenshots into `metadata/` with Raycast’s **Capture Window** command (Save to Metadata).
+Smoke-test the glance pipeline without Raycast:
+
+```bash
+npx tsx scripts/test-glance.ts
+npx tsx scripts/test-glance.ts 2026-08-01
+```
+
+Before publishing: `npm run lint`, `npm run build`, then capture Store screenshots into `metadata/`.

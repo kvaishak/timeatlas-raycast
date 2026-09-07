@@ -2,6 +2,7 @@
 """Print Time Atlas events for a date or a range of dates, grouped by date."""
 
 import argparse
+import json
 import os
 import sys
 from collections import defaultdict
@@ -92,6 +93,45 @@ def _fmt_distance(meters: float) -> str:
     return f"{int(meters)} m"
 
 
+def _place_name(evt) -> str:
+    pv = evt.place_visit
+    return pv.name or pv.secondary_name or "(unnamed)"
+
+
+def _summarize_date(date_str, start, end) -> dict:
+    """Build a compact summary dict for one date (for --summary-json)."""
+    summary = {
+        "date": date_str,
+        "sleep": None,
+        "first_place": None,
+        "last_place": None,
+        "distance": None,
+    }
+    if not start or not end:
+        return summary
+
+    places = timeatlas.getEvents("placevisit", start, end)
+    if places:
+        summary["first_place"] = _place_name(places[0])
+        summary["last_place"] = _place_name(places[-1])
+
+    movements = timeatlas.getEvents("movement", start, end)
+    total_distance = 0.0
+    for evt in movements:
+        for a in evt.movement.move_activities:
+            if a.distance_meters:
+                total_distance += a.distance_meters
+    if total_distance:
+        summary["distance"] = _fmt_distance(total_distance)
+
+    sleeps = timeatlas.getEvents("sleep", start, end)
+    total_sleep_secs = sum(s.sleep.asleep_secs for s in sleeps)
+    if total_sleep_secs:
+        summary["sleep"] = _fmt_hm(total_sleep_secs)
+
+    return summary
+
+
 def _print_notes(event_id: str, indent: str = "    "):
     """Print journal entries (notes) for an event, if any."""
     for je in timeatlas.getJournalEntriesForEvent(event_id):
@@ -106,8 +146,8 @@ def _print_notes(event_id: str, indent: str = "    "):
 
 def _describe_event(evt) -> str:
     if evt.type == timeatlas_pb2.PLACEVISIT:
+        name = _place_name(evt)
         pv = evt.place_visit
-        name = pv.name or pv.secondary_name or "(unnamed)"
         loc = pv.city_or_county or pv.region or pv.country_code or ""
         return f"PLACEVISIT  {name}" + (f"  ({loc})" if loc else "")
     if evt.type == timeatlas_pb2.MOVEMENT:
@@ -268,7 +308,34 @@ def main():
         action="store_true",
         help="Hide the end-of-day totals (sleep, distance per activity).",
     )
+    parser.add_argument(
+        "--summary-json",
+        action="store_true",
+        help=(
+            "Print a single JSON object for from_date (sleep, first/last place, "
+            "distance) and exit. Ignores to_date / --show-notes / --no-summary."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.summary_json:
+        dates = timeatlas.getDates(args.from_date, args.from_date)
+        if not dates:
+            print(
+                json.dumps(
+                    {
+                        "date": args.from_date,
+                        "sleep": None,
+                        "first_place": None,
+                        "last_place": None,
+                        "distance": None,
+                    }
+                )
+            )
+            return
+        date_str, start, end = dates[0]
+        print(json.dumps(_summarize_date(date_str, start, end)))
+        return
 
     to_date = args.to_date or args.from_date
 

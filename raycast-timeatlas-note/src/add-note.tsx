@@ -2,67 +2,28 @@ import {
   Action,
   ActionPanel,
   Form,
-  getPreferenceValues,
+  Icon,
+  open,
   popToRoot,
   showToast,
   Toast,
 } from "@raycast/api";
 import { promises as fs } from "fs";
-import os from "os";
 import path from "path";
-
-interface Preferences {
-  icloudPath?: string;
-}
-
-interface FormValues {
-  text: string;
-  date: Date | null;
-}
-
-const DEFAULT_ICLOUD_DIR = path.join(
-  os.homedir(),
-  "Library",
-  "Mobile Documents",
-  "iCloud~com~timeatlaslabs~Pat",
-  "Documents",
-);
-
-function toLocalDateString(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function resolveIcloudDir(override?: string): string {
-  const trimmed = override?.trim();
-  return trimmed ? trimmed : DEFAULT_ICLOUD_DIR;
-}
+import { useEffect, useState } from "react";
+import {
+  checkIcloudSetup,
+  ICLOUD_SETTINGS_URL,
+  TIME_ATLAS_SITE,
+  type IcloudSetup,
+} from "./lib/icloud-status";
+import { getExtensionPreferences, toLocalDateString } from "./lib/paths";
 
 async function writeNote(
   icloudDir: string,
   dateStr: string,
   text: string,
 ): Promise<string> {
-  try {
-    const stat = await fs.stat(icloudDir);
-    if (!stat.isDirectory()) {
-      throw new Error(`Not a directory: ${icloudDir}`);
-    }
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      "code" in error &&
-      (error as NodeJS.ErrnoException).code === "ENOENT"
-    ) {
-      throw new Error(
-        `Time Atlas iCloud folder not found. Is Time Atlas installed and signed in to iCloud?\n${icloudDir}`,
-      );
-    }
-    throw error;
-  }
-
   const now = new Date();
   const record = {
     text,
@@ -78,9 +39,22 @@ async function writeNote(
 }
 
 export default function AddNoteCommand() {
-  const { icloudPath } = getPreferenceValues<Preferences>();
+  const { icloudPath } = getExtensionPreferences();
+  const [setup, setSetup] = useState<IcloudSetup | null>(null);
+  const [setupKey, setSetupKey] = useState(0);
 
-  async function handleSubmit(values: FormValues) {
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const next = await checkIcloudSetup(icloudPath);
+      if (!cancelled) setSetup(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [icloudPath, setupKey]);
+
+  async function handleSubmit(values: { text: string; date: Date | null }) {
     const text = values.text.trim();
     if (!text) {
       await showToast({ style: Toast.Style.Failure, title: "Note is empty" });
@@ -88,14 +62,18 @@ export default function AddNoteCommand() {
     }
 
     const dateStr = toLocalDateString(values.date ?? new Date());
-    const icloudDir = resolveIcloudDir(icloudPath);
 
     const toast = await showToast({
       style: Toast.Style.Animated,
       title: "Saving note...",
     });
     try {
-      await writeNote(icloudDir, dateStr, text);
+      const latest = await checkIcloudSetup(icloudPath);
+      setSetup(latest);
+      if (!latest.ok) {
+        throw new Error(`${latest.title}\n\n${latest.description}`);
+      }
+      await writeNote(latest.path, dateStr, text);
       toast.style = Toast.Style.Success;
       toast.title = "Note added";
       toast.message = dateStr;
@@ -107,27 +85,75 @@ export default function AddNoteCommand() {
     }
   }
 
+  const blocked = setup !== null && setup.ok === false;
+
   return (
     <Form
+      isLoading={setup === null}
       actions={
         <ActionPanel>
-          <Action.SubmitForm title="Add Note" onSubmit={handleSubmit} />
+          {!blocked ? (
+            <Action.SubmitForm title="Add Note" onSubmit={handleSubmit} />
+          ) : null}
+          {setup && !setup.ok && setup.issue === "no-icloud" ? (
+            <Action
+              title="Open System Settings"
+              icon={Icon.Gear}
+              onAction={() => open(ICLOUD_SETTINGS_URL)}
+            />
+          ) : null}
+          {setup &&
+          !setup.ok &&
+          (setup.issue === "no-timeatlas" ||
+            setup.issue === "not-directory") ? (
+            <Action.OpenInBrowser
+              title="Open Time Atlas Website"
+              url={TIME_ATLAS_SITE}
+            />
+          ) : null}
+          {setup ? (
+            <Action.CopyToClipboard
+              title="Copy Expected Folder Path"
+              content={setup.path}
+            />
+          ) : null}
+          <Action
+            title="Recheck Setup"
+            icon={Icon.ArrowClockwise}
+            shortcut={{ modifiers: ["cmd"], key: "r" }}
+            onAction={() => {
+              setSetup(null);
+              setSetupKey((k) => k + 1);
+            }}
+          />
         </ActionPanel>
       }
     >
-      <Form.DatePicker
-        id="date"
-        title="Date"
-        type={Form.DatePicker.Type.Date}
-        defaultValue={new Date()}
-      />
-      <Form.TextArea
-        id="text"
-        title="Note"
-        placeholder="What happened?"
-        enableMarkdown={false}
-        autoFocus
-      />
+      {blocked ? (
+        <>
+          <Form.Description
+            title={setup.title}
+            text={`${setup.description}\n\nExpected folder:\n${setup.path}`}
+          />
+        </>
+      ) : (
+        <>
+          <Form.Description text="Notes are saved to your Time Atlas iCloud folder. No extra setup needed if Time Atlas is signed in to iCloud." />
+          <Form.DatePicker
+            id="date"
+            title="Date"
+            type={Form.DatePicker.Type.Date}
+            defaultValue={new Date()}
+          />
+          <Form.TextArea
+            id="text"
+            title="Note"
+            placeholder="What happened?"
+            enableMarkdown={false}
+            autoFocus
+          />
+        </>
+      )}
     </Form>
   );
 }
