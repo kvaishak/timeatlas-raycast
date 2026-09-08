@@ -338,7 +338,7 @@ export default function Command() {
 
   if (state.kind === "setup") {
     return (
-      <List isLoading={false} navigationTitle="Today at a Glance">
+      <List isLoading={false}>
         <List.EmptyView
           icon={setupEmptyIcon(state.setup.issue)}
           title={state.setup.title}
@@ -351,7 +351,7 @@ export default function Command() {
 
   if (state.kind === "error") {
     return (
-      <List isLoading={false} navigationTitle="Today at a Glance">
+      <List isLoading={false}>
         <List.EmptyView
           icon={Icon.Warning}
           title="Couldn’t load today"
@@ -374,7 +374,6 @@ export default function Command() {
     <List
       isLoading={isLoading}
       isShowingDetail
-      navigationTitle="Today at a Glance"
       searchBarPlaceholder="Filter metrics…"
       selectedItemId={selected}
       onSelectionChange={(id) => {
