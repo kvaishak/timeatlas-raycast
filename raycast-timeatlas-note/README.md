@@ -1,66 +1,46 @@
-# Time Atlas
+# Timeatlas
 
-Raycast extension for [Time Atlas](https://timeatlas.app): add notes and see today’s timeline at a glance — **zero config** (no Python, no git checkout, no local database).
+Use [Time Atlas](https://timeatlas.app) from Raycast: jot a note for any day, or open a quick summary of today — sleep, places, distance, and notes.
 
-## Requirements
+No API keys, no database, no extra install. If Time Atlas is signed in to iCloud on your Mac, this extension just works.
 
-- macOS with **iCloud Drive** enabled
-- [Time Atlas](https://timeatlas.app) installed and signed in (so its iCloud Documents folder exists)
+## What you need
 
-If iCloud Drive or the Time Atlas folder is missing, both commands show a clear setup screen with actions to open iCloud Settings / Time Atlas and to recheck.
+- macOS with **iCloud Drive** turned on
+- [Time Atlas](https://timeatlas.app) installed and signed in
+
+If something is missing, both commands show a setup screen with links to fix it (iCloud Settings or Time Atlas) and a way to recheck.
 
 ## Commands
 
 ### Add Note
 
-Pick a date, write a note, submit. Saves `note_<timestamp>.json` to:
+1. Pick a date (defaults to today)
+2. Write your note
+3. Press **Add Note**
 
-```text
-~/Library/Mobile Documents/iCloud~com~timeatlaslabs~Pat/Documents
-```
-
-```json
-{
-  "text": "Your note",
-  "source": "user:raycast",
-  "timestamp": "2026-09-07T15:00:00.000Z",
-  "date": "2026-09-07"
-}
-```
+The note is saved into your Time Atlas iCloud folder. Time Atlas picks it up on sync. Until then, **Today at a Glance** already shows it.
 
 ### Today at a Glance
 
-List + detail view (Overview, Sleep, Places, Distance, Notes).
+Open a list + detail view of **today**:
 
-Each open reads the Time Atlas iCloud folder **fresh** (no disk cache):
+- **Overview** — one-line summary of the day, plus notes
+- **Sleep** — total sleep
+- **Places** — first / last place (or a single place if you stayed put)
+- **Distance** — distance moved
+- **Notes** — journal notes for today (including ones you just added from Raycast)
 
-- Timeline `.pb` / `.zip` update files (protobuf)
-- Pending `note_*.json` files from **Add Note** (shown immediately, even before Time Atlas imports them)
+Useful shortcuts:
 
-Shortcuts:
-
-- **⌘C** — copy one-line summary  
-- **⌘⇧C** — copy notes  
-- **⌘R** — refresh  
+- **⏎** / **⌘C** — copy the one-line summary
+- **⌘⇧C** — copy today’s notes
+- **⌘R** — refresh from iCloud
 
 ## Preferences
 
-| Preference | Description |
-| --- | --- |
-| **Time Atlas iCloud Folder** | Optional. Override the default iCloud Documents path. |
+**Time Atlas iCloud Folder** is optional. Leave it empty unless your Time Atlas data is not in the default iCloud Documents location.
 
-## Development
+## Privacy
 
-```bash
-npm install
-npm run dev
-```
-
-Smoke-test the glance pipeline without Raycast:
-
-```bash
-npx tsx scripts/test-glance.ts
-npx tsx scripts/test-glance.ts 2026-08-01
-```
-
-Before publishing: `npm run lint`, `npm run build`, then capture Store screenshots into `metadata/`.
+Everything stays on your Mac and in your Time Atlas iCloud folder. This extension does not send data to any server.

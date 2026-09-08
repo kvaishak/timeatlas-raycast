@@ -1,7 +1,7 @@
 {
   "$schema": "https://www.raycast.com/schemas/extension.json",
-  "name": "timeatlas-note",
-  "title": "Time Atlas",
+  "name": "timeatlas",
+  "title": "Timeatlas",
   "description": "Notes and daily glance for Time Atlas.",
   "icon": "icon.png",
   "author": "shak",

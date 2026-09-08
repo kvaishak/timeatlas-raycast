@@ -4,7 +4,7 @@ Raycast extension and optional companion Python tools for [Time Atlas](https://t
 
 ## Raycast extension (`raycast-timeatlas-note/`)
 
-Zero-config macOS extension:
+**Timeatlas** — zero-config macOS extension:
 
 | Command | What it does |
 | --- | --- |
