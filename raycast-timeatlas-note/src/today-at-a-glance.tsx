@@ -282,61 +282,7 @@ export default function Command() {
       return <List.Item.Detail markdown={notesMarkdown(summary.notes)} />;
     }
 
-    return (
-      <List.Item.Detail
-        markdown={overviewMarkdown(today, summary)}
-        metadata={
-          <List.Item.Detail.Metadata>
-            <List.Item.Detail.Metadata.Label
-              title="Date"
-              text={today}
-              icon={Icon.Calendar}
-            />
-            <List.Item.Detail.Metadata.Separator />
-            <List.Item.Detail.Metadata.TagList title="Summary">
-              {summary.sleep ? (
-                <List.Item.Detail.Metadata.TagList.Item
-                  text={summary.sleep}
-                  icon={Icon.Moon}
-                  color={Color.Purple}
-                />
-              ) : null}
-              {places ? (
-                <List.Item.Detail.Metadata.TagList.Item
-                  text={places}
-                  icon={Icon.Pin}
-                  color={Color.Blue}
-                />
-              ) : null}
-              {summary.distance ? (
-                <List.Item.Detail.Metadata.TagList.Item
-                  text={summary.distance}
-                  icon={Icon.Footprints}
-                  color={Color.Green}
-                />
-              ) : null}
-              {summary.notes.length ? (
-                <List.Item.Detail.Metadata.TagList.Item
-                  text={
-                    summary.notes.length === 1
-                      ? "1 note"
-                      : `${summary.notes.length} notes`
-                  }
-                  icon={Icon.Pencil}
-                  color={Color.Orange}
-                />
-              ) : null}
-              {!hasDayData(summary) ? (
-                <List.Item.Detail.Metadata.TagList.Item
-                  text="No data"
-                  color={Color.SecondaryText}
-                />
-              ) : null}
-            </List.Item.Detail.Metadata.TagList>
-          </List.Item.Detail.Metadata>
-        }
-      />
-    );
+    return <List.Item.Detail markdown={overviewMarkdown(today, summary)} />;
   }, [places, selected, summary, today]);
 
   const readyActions = (
