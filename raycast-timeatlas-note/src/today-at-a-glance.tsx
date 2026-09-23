@@ -1,10 +1,10 @@
 import { Action, ActionPanel, Color, environment, Icon, List, open, showToast, Toast, Keyboard } from "@raycast/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fmtClock, fmtDistance, fmtHm, summarizeTodayFromIcloud, type DaySummary } from "./lib/glance";
+import { fmtClock, fmtDistance, fmtHm, fmtSteps, summarizeTodayFromIcloud, type DaySummary } from "./lib/glance";
 import { checkIcloudSetup, ICLOUD_SETTINGS_URL, TIME_ATLAS_SITE, type IcloudSetupFail } from "./lib/icloud-status";
 import { getExtensionPreferences, glanceProtoPath, toLocalDateString } from "./lib/paths";
 
-type MetricId = "overview" | "sleep" | "places" | "distance" | "notes";
+type MetricId = "overview" | "sleep" | "places" | "steps" | "distance" | "notes";
 
 type GlanceLoadState =
   | { kind: "loading" }
@@ -41,6 +41,7 @@ function hasDayData(summary: DaySummary): boolean {
   return Boolean(
     summary.sleep ||
     summary.places.length ||
+    summary.steps ||
     summary.distance ||
     summary.distanceByActivity.length ||
     summary.notes.length,
@@ -51,6 +52,7 @@ function oneLiner(summary: DaySummary): string {
   const parts: string[] = [];
   if (summary.sleep) parts.push(`${summary.sleep} sleep`);
   if (summary.placesSummary) parts.push(summary.placesSummary);
+  if (summary.steps) parts.push(summary.steps);
   if (summary.distance) parts.push(summary.distance);
   if (summary.notes.length) {
     parts.push(summary.notes.length === 1 ? "1 note" : `${summary.notes.length} notes`);
@@ -94,6 +96,9 @@ function overviewMarkdown(dateStr: string, summary: DaySummary): string {
   }
   if (summary.placesSummary) {
     lines.push(`- **Places** — ${summary.placesSummary}`);
+  }
+  if (summary.steps) {
+    lines.push(`- **Steps** — ${summary.steps}`);
   }
   if (summary.distance) {
     lines.push(`- **Distance** — ${summary.distance} active`);
@@ -172,6 +177,39 @@ function placesMarkdown(summary: DaySummary): string {
       lines.push(`   ${p.secondaryName}`);
     }
   });
+
+  return lines.join("\n");
+}
+
+function stepsMarkdown(summary: DaySummary): string {
+  if (!summary.stepsTotal) {
+    return `# Steps\n\n_No steps recorded for today._`;
+  }
+
+  const basis = summary.stepsExternal ? "synced day total" : "at places";
+  const lines = [`# Steps`, "", `**${fmtSteps(summary.stepsTotal)}** (${basis})`, "", "## Sources", ""];
+
+  if (summary.stepsExternal) {
+    lines.push(`- **Day total (synced)** — ${fmtSteps(summary.stepsExternal)}`);
+  }
+  if (summary.stepsAtPlaces) {
+    lines.push(`- **At places** — ${fmtSteps(summary.stepsAtPlaces)}`);
+  }
+  if (summary.stepsExternal && summary.stepsAtPlaces) {
+    lines.push(
+      "",
+      "_Headline uses the synced day total; at-place walks are a breakdown of activity while visiting places._",
+    );
+  }
+
+  if (summary.stepsByPlace.length) {
+    lines.push("", "## At places", "");
+    for (const row of summary.stepsByPlace) {
+      const bits = [fmtSteps(row.steps)];
+      if (row.distanceMeters) bits.push(fmtDistance(row.distanceMeters));
+      lines.push(`- **${row.name}** — ${bits.join(" · ")}`);
+    }
+  }
 
   return lines.join("\n");
 }
@@ -281,6 +319,23 @@ export default function Command() {
   const notesText = summary?.notes.join("\n\n") ?? "";
   const isLoading = state.kind === "loading";
 
+  const showSleep = Boolean(summary?.sleep);
+  const showPlaces = Boolean(summary?.places.length);
+  const showSteps = Boolean(summary?.steps);
+  const showDistance = Boolean(summary?.distance || summary?.distanceByActivity.length);
+  const showNotes = Boolean(summary?.notes.length);
+
+  useEffect(() => {
+    if (!summary) return;
+    const visible = new Set<string>(["overview"]);
+    if (showSleep) visible.add("sleep");
+    if (showPlaces) visible.add("places");
+    if (showSteps) visible.add("steps");
+    if (showDistance) visible.add("distance");
+    if (showNotes) visible.add("notes");
+    if (!visible.has(selected)) setSelected("overview");
+  }, [summary, selected, showSleep, showPlaces, showSteps, showDistance, showNotes]);
+
   const detail = useMemo(() => {
     if (!summary) {
       return <List.Item.Detail isLoading markdown="# Loading…" />;
@@ -305,6 +360,34 @@ export default function Command() {
                 <List.Item.Detail.Metadata.Label
                   title="Last"
                   text={summary.places[summary.places.length - 1]?.name ?? "—"}
+                />
+              </List.Item.Detail.Metadata>
+            ) : undefined
+          }
+        />
+      );
+    }
+
+    if (id === "steps") {
+      return (
+        <List.Item.Detail
+          markdown={stepsMarkdown(summary)}
+          metadata={
+            summary.stepsTotal ? (
+              <List.Item.Detail.Metadata>
+                <List.Item.Detail.Metadata.Label
+                  title="Total"
+                  text={fmtSteps(summary.stepsTotal)}
+                  icon={Icon.Footprints}
+                />
+                <List.Item.Detail.Metadata.Separator />
+                <List.Item.Detail.Metadata.Label
+                  title="Synced"
+                  text={summary.stepsExternal ? fmtSteps(summary.stepsExternal) : "—"}
+                />
+                <List.Item.Detail.Metadata.Label
+                  title="At places"
+                  text={summary.stepsAtPlaces ? fmtSteps(summary.stepsAtPlaces) : "—"}
                 />
               </List.Item.Detail.Metadata>
             ) : undefined
@@ -430,64 +513,83 @@ export default function Command() {
           detail={detail}
           actions={readyActions}
         />
-        <List.Item
-          id="sleep"
-          title="Sleep"
-          subtitle={summary?.sleep ?? "—"}
-          icon={{ source: Icon.Moon, tintColor: Color.Purple }}
-          accessories={summary?.sleep ? [{ tag: { value: summary.sleep, color: Color.Purple } }] : undefined}
-          detail={detail}
-          actions={readyActions}
-        />
-        <List.Item
-          id="places"
-          title="Places"
-          subtitle={placesSub ?? "—"}
-          icon={{ source: Icon.Pin, tintColor: Color.Blue }}
-          accessories={
-            summary?.places.length
-              ? [
-                  {
-                    tag: {
-                      value: String(summary.places.length),
-                      color: Color.Blue,
+        {showSleep ? (
+          <List.Item
+            id="sleep"
+            title="Sleep"
+            subtitle={summary?.sleep ?? "—"}
+            icon={{ source: Icon.Moon, tintColor: Color.Purple }}
+            accessories={summary?.sleep ? [{ tag: { value: summary.sleep, color: Color.Purple } }] : undefined}
+            detail={detail}
+            actions={readyActions}
+          />
+        ) : null}
+        {showPlaces ? (
+          <List.Item
+            id="places"
+            title="Places"
+            subtitle={placesSub ?? "—"}
+            icon={{ source: Icon.Pin, tintColor: Color.Blue }}
+            accessories={
+              summary?.places.length
+                ? [
+                    {
+                      tag: {
+                        value: String(summary.places.length),
+                        color: Color.Blue,
+                      },
                     },
-                  },
-                ]
-              : undefined
-          }
-          detail={detail}
-          actions={readyActions}
-        />
-        <List.Item
-          id="distance"
-          title="Distance"
-          subtitle={summary?.distance ?? "—"}
-          icon={{ source: Icon.Footprints, tintColor: Color.Green }}
-          accessories={summary?.distance ? [{ tag: { value: summary.distance, color: Color.Green } }] : undefined}
-          detail={detail}
-          actions={readyActions}
-        />
-        <List.Item
-          id="notes"
-          title="Notes"
-          subtitle={notesPreview ?? "—"}
-          icon={{ source: Icon.Pencil, tintColor: Color.Orange }}
-          accessories={
-            summary?.notes.length
-              ? [
-                  {
-                    tag: {
-                      value: summary.notes.length === 1 ? "1 note" : `${summary.notes.length} notes`,
-                      color: Color.Orange,
+                  ]
+                : undefined
+            }
+            detail={detail}
+            actions={readyActions}
+          />
+        ) : null}
+        {showSteps ? (
+          <List.Item
+            id="steps"
+            title="Steps"
+            subtitle={summary?.steps ?? "—"}
+            icon={{ source: Icon.Footprints, tintColor: Color.Yellow }}
+            accessories={summary?.steps ? [{ tag: { value: summary.steps, color: Color.Yellow } }] : undefined}
+            detail={detail}
+            actions={readyActions}
+          />
+        ) : null}
+        {showDistance ? (
+          <List.Item
+            id="distance"
+            title="Distance"
+            subtitle={summary?.distance ?? "—"}
+            icon={{ source: Icon.Compass, tintColor: Color.Green }}
+            accessories={summary?.distance ? [{ tag: { value: summary.distance, color: Color.Green } }] : undefined}
+            detail={detail}
+            actions={readyActions}
+          />
+        ) : null}
+        {showNotes ? (
+          <List.Item
+            id="notes"
+            title="Notes"
+            subtitle={notesPreview ?? "—"}
+            icon={{ source: Icon.Pencil, tintColor: Color.Orange }}
+            accessories={
+              summary?.notes.length
+                ? [
+                    {
+                      tag: {
+                        value: summary.notes.length === 1 ? "1 note" : `${summary.notes.length} notes`,
+                        color: Color.Orange,
+                      },
                     },
-                  },
-                ]
-              : undefined
-          }
-          detail={detail}
-          actions={readyActions}
-        />
+                  ]
+                : undefined
+            }
+            detail={detail}
+            actions={readyActions}
+          />
+        ) : null}
       </List.Section>
     </List>
   );

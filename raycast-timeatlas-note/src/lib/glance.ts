@@ -114,8 +114,12 @@ export interface GlanceEvent {
   start?: number;
   end?: number;
   date?: string;
+  /** DateEvent.external_data.steps (Health / day total synced onto the date). */
+  externalSteps?: number;
   placeName?: string;
   placeSecondaryName?: string;
+  /** PlaceVisit.inside_activities (walks while at a place). */
+  insideActivities?: MoveActivityDetail[];
   asleepSecs?: number;
   sleepType?: number;
   activities?: MoveActivityDetail[];
@@ -160,12 +164,26 @@ export interface DistanceByActivity {
   segments: MoveActivityDetail[];
 }
 
+export interface StepsByPlace {
+  name: string;
+  steps: number;
+  distanceMeters: number;
+}
+
 export interface DaySummary {
   date: string;
   /** Overview: stage sleep for the wake-day night (Core+Deep+REM), formatted. */
   sleep: string | null;
   /** Overview: active-mode distance only, formatted. */
   distance: string | null;
+  /** Overview: day steps (prefer synced external total; else at-places), formatted. */
+  steps: string | null;
+  stepsTotal: number;
+  /** DateEvent.external_data.steps — usually the Health day total. */
+  stepsExternal: number;
+  /** Sum of PlaceVisit.inside_activities steps (shown as breakdown; not always additive). */
+  stepsAtPlaces: number;
+  stepsByPlace: StepsByPlace[];
   /** Overview / one-liner: visit path with consecutive dupes collapsed. */
   placesSummary: string | null;
   /** Day notes: timeline journal entries + pending note_*.json files. */
@@ -291,14 +309,36 @@ function toGlanceEvent(raw: Record<string, unknown>): GlanceEvent | null {
   const event: GlanceEvent = { id, type, start, end };
 
   if (type === EventType.DATE) {
-    const dateEvent = raw.dateEvent as { date?: string } | undefined;
+    const dateEvent = raw.dateEvent as
+      | {
+          date?: string;
+          externalData?: { steps?: number };
+        }
+      | undefined;
     event.date = dateEvent?.date;
+    const externalSteps = Number(dateEvent?.externalData?.steps ?? 0);
+    if (externalSteps) event.externalSteps = externalSteps;
   } else if (type === EventType.PLACEVISIT) {
-    const pv = (raw.placeVisit as { name?: string; secondaryName?: string }) ?? {};
+    const pv =
+      (raw.placeVisit as {
+        name?: string;
+        secondaryName?: string;
+        insideActivities?: Array<{
+          activity?: string;
+          startAt?: {
+            UTCTimestamp?: { seconds?: number | string; nanos?: number };
+          };
+          durationSecs?: number;
+          distanceMeters?: number;
+          steps?: number;
+        }>;
+      }) ?? {};
     event.placeName = placeName(pv);
     if (pv.secondaryName && pv.name) {
       event.placeSecondaryName = pv.secondaryName;
     }
+    const inside = parseActivities({ moveActivities: pv.insideActivities });
+    if (inside.length) event.insideActivities = inside;
   } else if (type === EventType.MOVEMENT) {
     const activities = parseActivities((raw.movement as never) ?? {});
     if (activities.length) event.activities = activities;
@@ -478,6 +518,10 @@ export function fmtDistance(meters: number): string {
   return `${Math.floor(meters)} m`;
 }
 
+export function fmtSteps(steps: number): string {
+  return `${steps.toLocaleString()} steps`;
+}
+
 export function fmtClock(unix?: number): string {
   if (unix == null) return "—";
   const d = new Date(unix * 1000);
@@ -575,6 +619,11 @@ export function summarizeDay(
     date: dateStr,
     sleep: null,
     distance: null,
+    steps: null,
+    stepsTotal: 0,
+    stepsExternal: 0,
+    stepsAtPlaces: 0,
+    stepsByPlace: [],
     placesSummary: null,
     notes: [],
     places: [],
@@ -610,6 +659,35 @@ export function summarizeDay(
     end: e.end,
   }));
   summary.placesSummary = placesPath(summary.places);
+
+  summary.stepsExternal = dateEvent?.externalSteps ?? 0;
+  const stepsByPlace = new Map<string, StepsByPlace>();
+  for (const e of placeEvents) {
+    let placeSteps = 0;
+    let placeMeters = 0;
+    for (const act of e.insideActivities ?? []) {
+      placeSteps += act.steps ?? 0;
+      placeMeters += act.distanceMeters;
+    }
+    if (!placeSteps && !placeMeters) continue;
+    summary.stepsAtPlaces += placeSteps;
+    const name = e.placeName ?? "(unnamed)";
+    const existing = stepsByPlace.get(name);
+    if (existing) {
+      existing.steps += placeSteps;
+      existing.distanceMeters += placeMeters;
+    } else {
+      stepsByPlace.set(name, { name, steps: placeSteps, distanceMeters: placeMeters });
+    }
+  }
+  summary.stepsByPlace = [...stepsByPlace.values()].sort((a, b) => b.steps - a.steps);
+  // Prefer DateEvent.external_data (matches Time Atlas day total). Fall back to
+  // at-place walks when the synced total isn't present yet — don't sum both
+  // (external already includes indoor walking).
+  summary.stepsTotal = summary.stepsExternal || summary.stepsAtPlaces;
+  if (summary.stepsTotal) {
+    summary.steps = fmtSteps(summary.stepsTotal);
+  }
 
   const activityBuckets = new Map<string, DistanceByActivity>();
   for (const e of all) {
