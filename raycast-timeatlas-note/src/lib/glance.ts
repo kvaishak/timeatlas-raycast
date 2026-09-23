@@ -32,11 +32,13 @@ const SLEEP_TYPE_NAMES: Record<number, string> = {
 };
 
 /** Stages used for the overview sleep total (avoids double-counting IN_BED). */
-const SLEEP_STAGE_TYPES = new Set<number>([
-  SleepType.CORE,
-  SleepType.DEEP,
-  SleepType.REM,
-]);
+const SLEEP_STAGE_TYPES = new Set<number>([SleepType.CORE, SleepType.DEEP, SleepType.REM]);
+
+/**
+ * Max gap between sleep segments still treated as one night/session.
+ * Matches Time Atlas by attributing the whole bout to the wake day.
+ */
+const SLEEP_SESSION_GAP_SECS = 2 * 60 * 60;
 
 const ACTIVITY_NAMES: Record<string, string> = {
   wlk: "Walk",
@@ -160,7 +162,7 @@ export interface DistanceByActivity {
 
 export interface DaySummary {
   date: string;
-  /** Overview: stage sleep only (Core+Deep+REM), formatted. */
+  /** Overview: stage sleep for the wake-day night (Core+Deep+REM), formatted. */
   sleep: string | null;
   /** Overview: active-mode distance only, formatted. */
   distance: string | null;
@@ -214,9 +216,7 @@ function tsoToUnix(
   return seconds + nanos / 1e9;
 }
 
-function isDeleted(meta: {
-  deletedAt?: { UTCTimestamp?: { seconds?: number | string; nanos?: number } };
-}): boolean {
+function isDeleted(meta: { deletedAt?: { UTCTimestamp?: { seconds?: number | string; nanos?: number } } }): boolean {
   const ts = meta.deletedAt?.UTCTimestamp;
   if (!ts) return false;
   return Number(ts.seconds ?? 0) !== 0 || Number(ts.nanos ?? 0) !== 0;
@@ -294,8 +294,7 @@ function toGlanceEvent(raw: Record<string, unknown>): GlanceEvent | null {
     const dateEvent = raw.dateEvent as { date?: string } | undefined;
     event.date = dateEvent?.date;
   } else if (type === EventType.PLACEVISIT) {
-    const pv =
-      (raw.placeVisit as { name?: string; secondaryName?: string }) ?? {};
+    const pv = (raw.placeVisit as { name?: string; secondaryName?: string }) ?? {};
     event.placeName = placeName(pv);
     if (pv.secondaryName && pv.name) {
       event.placeSecondaryName = pv.secondaryName;
@@ -304,8 +303,7 @@ function toGlanceEvent(raw: Record<string, unknown>): GlanceEvent | null {
     const activities = parseActivities((raw.movement as never) ?? {});
     if (activities.length) event.activities = activities;
   } else if (type === EventType.SLEEP) {
-    const sleep = raw.sleep as
-      { asleepSecs?: number; type?: number } | undefined;
+    const sleep = raw.sleep as { asleepSecs?: number; type?: number } | undefined;
     if (sleep?.asleepSecs) event.asleepSecs = sleep.asleepSecs;
     if (sleep?.type != null) event.sleepType = Number(sleep.type);
   }
@@ -315,8 +313,7 @@ function toGlanceEvent(raw: Record<string, unknown>): GlanceEvent | null {
 
 function toGlanceNote(
   raw: Record<string, unknown>,
-):
-  { kind: "upsert"; note: GlanceNote } | { kind: "delete"; id: string } | null {
+): { kind: "upsert"; note: GlanceNote } | { kind: "delete"; id: string } | null {
   const meta = raw.meta as MetaObj | undefined;
   const id = meta?.ID;
   if (!id) return null;
@@ -371,13 +368,7 @@ function applyDirectory(
 
 async function listDataFiles(icloudDir: string): Promise<string[]> {
   const entries = await fs.readdir(icloudDir);
-  return entries
-    .filter(
-      (name) =>
-        !name.startsWith("ip") &&
-        (name.endsWith(".pb") || name.endsWith(".zip")),
-    )
-    .sort();
+  return entries.filter((name) => !name.startsWith("ip") && (name.endsWith(".pb") || name.endsWith(".zip"))).sort();
 }
 
 async function processPbBytes(
@@ -422,22 +413,14 @@ async function processFile(
 }
 
 /** Fresh in-memory rebuild from all iCloud timeline update files (no disk cache). */
-export async function loadGlanceState(
-  icloudDir: string,
-  paths: GlancePaths,
-): Promise<GlanceState> {
+export async function loadGlanceState(icloudDir: string, paths: GlancePaths): Promise<GlanceState> {
   const { FullDirectory } = await getTypes(paths.protoPath);
   const events: Record<string, GlanceEvent> = {};
   const notes: Record<string, GlanceNote> = {};
   const files = await listDataFiles(icloudDir);
 
   for (const filename of files) {
-    await processFile(
-      FullDirectory,
-      events,
-      notes,
-      path.join(icloudDir, filename),
-    );
+    await processFile(FullDirectory, events, notes, path.join(icloudDir, filename));
   }
 
   return { events, notes };
@@ -449,10 +432,7 @@ interface PendingNoteFile {
 }
 
 /** Notes written by Add Note (`note_<millis>.json`) that Time Atlas may not have imported yet. */
-async function loadPendingJsonNotes(
-  icloudDir: string,
-  dateStr: string,
-): Promise<PendingNoteFile[]> {
+async function loadPendingJsonNotes(icloudDir: string, dateStr: string): Promise<PendingNoteFile[]> {
   let entries: string[];
   try {
     entries = await fs.readdir(icloudDir);
@@ -474,16 +454,10 @@ async function loadPendingJsonNotes(
       const text = (record.text ?? "").trim();
       if (!text) continue;
       const fromName = Number(name.slice("note_".length, -".json".length));
-      const fromTs = record.timestamp
-        ? Date.parse(record.timestamp)
-        : Number.NaN;
+      const fromTs = record.timestamp ? Date.parse(record.timestamp) : Number.NaN;
       pending.push({
         text,
-        timestampMs: Number.isFinite(fromName)
-          ? fromName
-          : Number.isFinite(fromTs)
-            ? fromTs
-            : 0,
+        timestampMs: Number.isFinite(fromName) ? fromName : Number.isFinite(fromTs) ? fromTs : 0,
       });
     } catch {
       // skip malformed note files
@@ -520,15 +494,60 @@ function localDayBounds(dateStr: string): { start: number; end: number } {
   return { start, end };
 }
 
-function overlaps(
-  evStart: number | undefined,
-  evEnd: number | undefined,
-  from: number,
-  to: number,
-): boolean {
+function localDateStringFromUnix(unix: number): string {
+  const d = new Date(unix * 1000);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function overlaps(evStart: number | undefined, evEnd: number | undefined, from: number, to: number): boolean {
   if (evStart == null) return false;
   const end = evEnd ?? evStart;
   return evStart <= to && end >= from;
+}
+
+/** Group contiguous sleep segments into night/nap sessions. */
+export function clusterSleepSessions(events: GlanceEvent[]): GlanceEvent[][] {
+  const sorted = events
+    .filter((e) => e.type === EventType.SLEEP && e.start != null)
+    .sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
+
+  const sessions: GlanceEvent[][] = [];
+  let current: GlanceEvent[] = [];
+  let currentEnd = 0;
+
+  for (const event of sorted) {
+    const start = event.start!;
+    const end = event.end ?? start;
+    if (!current.length || start - currentEnd <= SLEEP_SESSION_GAP_SECS) {
+      current.push(event);
+      currentEnd = Math.max(currentEnd, end);
+    } else {
+      sessions.push(current);
+      current = [event];
+      currentEnd = end;
+    }
+  }
+  if (current.length) sessions.push(current);
+  return sessions;
+}
+
+/**
+ * Sleep for a calendar day = all segments in sessions that *end* that day
+ * (wake-day attribution), so overnight pre-midnight stages count with the morning.
+ */
+export function sleepEventsForWakeDay(allEvents: GlanceEvent[], dateStr: string): GlanceEvent[] {
+  const sleeps = allEvents.filter((e) => e.type === EventType.SLEEP && e.start != null);
+  const selected: GlanceEvent[] = [];
+  for (const session of clusterSleepSessions(sleeps)) {
+    const sessionEnd = Math.max(...session.map((e) => e.end ?? e.start!));
+    if (localDateStringFromUnix(sessionEnd) === dateStr) {
+      selected.push(...session);
+    }
+  }
+  return selected.sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
 }
 
 function normalizeNoteText(text: string): string {
@@ -567,9 +586,7 @@ export function summarizeDay(
   };
 
   const all = Object.values(state.events);
-  const dateEvent = all.find(
-    (e) => e.type === EventType.DATE && e.date === dateStr,
-  );
+  const dateEvent = all.find((e) => e.type === EventType.DATE && e.date === dateStr);
 
   let from: number;
   let to: number;
@@ -583,10 +600,7 @@ export function summarizeDay(
   }
 
   const placeEvents = all
-    .filter(
-      (e) =>
-        e.type === EventType.PLACEVISIT && overlaps(e.start, e.end, from, to),
-    )
+    .filter((e) => e.type === EventType.PLACEVISIT && overlaps(e.start, e.end, from, to))
     .sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
 
   summary.places = placeEvents.map((e) => ({
@@ -639,11 +653,9 @@ export function summarizeDay(
     summary.distance = fmtDistance(summary.activeDistanceMeters);
   }
 
-  const sleepEvents = all
-    .filter(
-      (e) => e.type === EventType.SLEEP && overlaps(e.start, e.end, from, to),
-    )
-    .sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
+  // Attribute whole overnight bouts to the wake day (matches Time Atlas), not
+  // calendar-day overlap — otherwise pre-midnight stages are dropped.
+  const sleepEvents = sleepEventsForWakeDay(all, dateStr);
 
   const byTypeSecs = new Map<string, number>();
   let stageSecs = 0;
@@ -668,17 +680,12 @@ export function summarizeDay(
   // then untyped — never sum parent sessions together with stages.
   if (!stageSecs && sleepEvents.length) {
     const sumType = (type: number) =>
-      sleepEvents
-        .filter((e) => e.sleepType === type)
-        .reduce((sum, e) => sum + (e.asleepSecs ?? 0), 0);
+      sleepEvents.filter((e) => e.sleepType === type).reduce((sum, e) => sum + (e.asleepSecs ?? 0), 0);
 
     const asleepSecs = sumType(SleepType.ASLEEP);
     const inBedSecs = sumType(SleepType.IN_BED);
     const untypedSecs = sleepEvents
-      .filter(
-        (e) =>
-          e.sleepType == null || e.sleepType === SleepType.ST_NOT_SPECIFIED,
-      )
+      .filter((e) => e.sleepType == null || e.sleepType === SleepType.ST_NOT_SPECIFIED)
       .reduce((sum, e) => sum + (e.asleepSecs ?? 0), 0);
 
     let fallbackType: number | null = null;
