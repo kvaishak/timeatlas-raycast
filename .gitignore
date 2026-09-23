@@ -219,3 +219,5 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# Local sync checkout of kvaishak/raycast-extensions (Store PR updates)
+.raycast-extensions-sync/
